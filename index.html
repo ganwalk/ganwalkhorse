@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Subdivisões Interativas</title>
+<style>
+  :root {
+    --creme: #f6efdf;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    background: var(--creme);
+    overflow: hidden;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  body {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #stage {
+    position: relative;
+    touch-action: none;
+    cursor: crosshair;
+  }
+  canvas { display: block; }
+  #loading {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--creme);
+    color: #8a7f68;
+    font-size: 14px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    transition: opacity 0.6s ease;
+    pointer-events: none;
+  }
+  #loading.done { opacity: 0; }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="canvas"></canvas></div>
+<div id="loading">carregando…</div>
+
+<script>
+(() => {
+  const COLS = 6;
+  const ROWS = 8;
+  const GAP = 3;           // respiro entre os quadrinhos (px CSS)
+  const BOOST = 2.6;       // quanto uma faixa cresce sob o ponteiro
+  const SIGMA = 0.16;      // alcance da influência do ponteiro (fração do lado)
+  const EASE = 0.10;       // suavização (0..1) por frame
+
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const loading = document.getElementById('loading');
+
+  const img = new Image();
+  img.src = 'WhatsApp%20Image%202026-07-23%20at%2013.05.01.jpeg';
+
+  let W = 0, H = 0, dpr = 1;
+
+  // pesos das colunas e linhas (atuais e alvo)
+  const colW = new Array(COLS).fill(1);
+  const rowW = new Array(ROWS).fill(1);
+  const colT = new Array(COLS).fill(1);
+  const rowT = new Array(ROWS).fill(1);
+
+  let pointer = { x: 0, y: 0, active: false };
+
+  function resize() {
+    const aspect = img.naturalWidth / img.naturalHeight;
+    const pad = 24;
+    const maxW = window.innerWidth - pad * 2;
+    const maxH = window.innerHeight - pad * 2;
+    W = maxW;
+    H = W / aspect;
+    if (H > maxH) { H = maxH; W = H * aspect; }
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+  }
+
+  // converte pesos em posições acumuladas que somam o tamanho total
+  function tracks(weights, total) {
+    let sum = 0;
+    for (const w of weights) sum += w;
+    const sizes = weights.map(w => (w / sum) * total);
+    const pos = [0];
+    for (const s of sizes) pos.push(pos[pos.length - 1] + s);
+    return { sizes, pos };
+  }
+
+  function updateTargets() {
+    if (!pointer.active) {
+      colT.fill(1);
+      rowT.fill(1);
+      return;
+    }
+    const { pos: cx } = tracks(colW, W);
+    const { pos: cy } = tracks(rowW, H);
+    const sx = SIGMA * W;
+    const sy = SIGMA * H;
+    for (let c = 0; c < COLS; c++) {
+      const center = (cx[c] + cx[c + 1]) / 2;
+      const d = (pointer.x - center) / sx;
+      colT[c] = 1 + BOOST * Math.exp(-0.5 * d * d);
+    }
+    for (let r = 0; r < ROWS; r++) {
+      const center = (cy[r] + cy[r + 1]) / 2;
+      const d = (pointer.y - center) / sy;
+      rowT[r] = 1 + BOOST * Math.exp(-0.5 * d * d);
+    }
+  }
+
+  function ease() {
+    for (let c = 0; c < COLS; c++) colW[c] += (colT[c] - colW[c]) * EASE;
+    for (let r = 0; r < ROWS; r++) rowW[r] += (rowT[r] - rowW[r]) * EASE;
+  }
+
+  function draw() {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+
+    const { sizes: cw, pos: cx } = tracks(colW, W);
+    const { sizes: rh, pos: cy } = tracks(rowW, H);
+
+    const baseW = W / COLS;
+    const baseH = H / ROWS;
+    const srcW = img.naturalWidth / COLS;
+    const srcH = img.naturalHeight / ROWS;
+
+    let n = 1;
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const dx = cx[c] + GAP / 2;
+        const dy = cy[r] + GAP / 2;
+        const dw = Math.max(cw[c] - GAP, 0.5);
+        const dh = Math.max(rh[r] - GAP, 0.5);
+
+        ctx.drawImage(img, c * srcW, r * srcH, srcW, srcH, dx, dy, dw, dh);
+
+        // rótulo: número e proporção (área atual / área original)
+        const ratio = (cw[c] * rh[r]) / (baseW * baseH);
+        const fs = Math.max(9, Math.min(dw, dh) * 0.16);
+        const label = String(n);
+        const prop = ratio.toFixed(2) + '×';
+
+        ctx.font = `600 ${fs}px "Helvetica Neue", Arial, sans-serif`;
+        const wLabel = ctx.measureText(label).width;
+        ctx.font = `400 ${fs * 0.78}px "Helvetica Neue", Arial, sans-serif`;
+        const wProp = ctx.measureText(prop).width;
+
+        const padX = fs * 0.45;
+        const chipW = Math.max(wLabel, wProp) + padX * 2;
+        const chipH = fs * 2.15;
+
+        if (chipW < dw - 4 && chipH < dh - 4) {
+          const chipX = dx + dw / 2 - chipW / 2;
+          const chipY = dy + dh / 2 - chipH / 2;
+          ctx.fillStyle = 'rgba(246, 239, 223, 0.82)';
+          ctx.beginPath();
+          if (ctx.roundRect) ctx.roundRect(chipX, chipY, chipW, chipH, fs * 0.35);
+          else ctx.rect(chipX, chipY, chipW, chipH);
+          ctx.fill();
+
+          ctx.fillStyle = '#2c2417';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'alphabetic';
+          ctx.font = `600 ${fs}px "Helvetica Neue", Arial, sans-serif`;
+          ctx.fillText(label, dx + dw / 2, chipY + fs * 1.05);
+          ctx.fillStyle = '#6f6451';
+          ctx.font = `400 ${fs * 0.78}px "Helvetica Neue", Arial, sans-serif`;
+          ctx.fillText(prop, dx + dw / 2, chipY + fs * 1.9);
+        }
+        n++;
+      }
+    }
+  }
+
+  function frame() {
+    updateTargets();
+    ease();
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  function setPointer(e) {
+    const rect = canvas.getBoundingClientRect();
+    pointer.x = e.clientX - rect.left;
+    pointer.y = e.clientY - rect.top;
+    pointer.active =
+      pointer.x >= 0 && pointer.x <= W && pointer.y >= 0 && pointer.y <= H;
+  }
+
+  canvas.addEventListener('pointermove', setPointer);
+  canvas.addEventListener('pointerdown', setPointer);
+  canvas.addEventListener('pointerleave', () => { pointer.active = false; });
+  canvas.addEventListener('pointercancel', () => { pointer.active = false; });
+  window.addEventListener('resize', () => { if (img.complete) resize(); });
+
+  img.onload = () => {
+    resize();
+    loading.classList.add('done');
+    requestAnimationFrame(frame);
+  };
+})();
+</script>
+</body>
+</html>
