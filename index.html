@@ -158,27 +158,20 @@
         ctx.font = `400 ${fs * 0.78}px "Helvetica Neue", Arial, sans-serif`;
         const wProp = ctx.measureText(prop).width;
 
-        const padX = fs * 0.45;
-        const chipW = Math.max(wLabel, wProp) + padX * 2;
-        const chipH = fs * 2.15;
+        const pad = fs * 0.4;
+        const textW = Math.max(wLabel, wProp);
+        const textH = fs * 2.0;
 
-        if (chipW < dw - 4 && chipH < dh - 4) {
-          const chipX = dx + dw / 2 - chipW / 2;
-          const chipY = dy + dh / 2 - chipH / 2;
-          ctx.fillStyle = 'rgba(246, 239, 223, 0.82)';
-          ctx.beginPath();
-          if (ctx.roundRect) ctx.roundRect(chipX, chipY, chipW, chipH, fs * 0.35);
-          else ctx.rect(chipX, chipY, chipW, chipH);
-          ctx.fill();
-
-          ctx.fillStyle = '#2c2417';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'alphabetic';
+        if (textW < dw - pad * 2 && textH < dh - pad * 2) {
+          const tx = dx + dw - pad;
+          const ty = dy + pad;
+          ctx.fillStyle = '#ffffff';
+          ctx.textAlign = 'right';
+          ctx.textBaseline = 'top';
           ctx.font = `600 ${fs}px "Helvetica Neue", Arial, sans-serif`;
-          ctx.fillText(label, dx + dw / 2, chipY + fs * 1.05);
-          ctx.fillStyle = '#6f6451';
+          ctx.fillText(label, tx, ty);
           ctx.font = `400 ${fs * 0.78}px "Helvetica Neue", Arial, sans-serif`;
-          ctx.fillText(prop, dx + dw / 2, chipY + fs * 1.9);
+          ctx.fillText(prop, tx, ty + fs * 1.1);
         }
         n++;
       }
