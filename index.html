@@ -3,10 +3,18 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>Subdivisões Interativas</title>
+<title>GANWALK — DEZERT HORSE — MALICIA</title>
 <style>
+  @font-face {
+    font-family: 'Archivo Black';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('archivo-black.woff2') format('woff2');
+  }
   :root {
     --creme: #f6efdf;
+    --tinta: #2c2417;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
@@ -20,15 +28,68 @@
     align-items: center;
     justify-content: center;
   }
+
+  /* ---------- tela de abertura ---------- */
+  #intro {
+    position: fixed;
+    inset: 0;
+    z-index: 5;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 7vmin;
+    background: var(--creme);
+    transition: opacity 0.7s ease, visibility 0.7s;
+  }
+  body.playing #intro {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+  #logo {
+    width: min(80vw, 620px, 130vh);
+    height: auto;
+    display: block;
+  }
+  #play {
+    font-family: inherit;
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.42em;
+    text-transform: uppercase;
+    text-indent: 0.42em;
+    color: var(--creme);
+    background: var(--tinta);
+    border: none;
+    border-radius: 999px;
+    padding: 16px 30px;
+    cursor: pointer;
+    transition: transform 0.25s ease, opacity 0.25s ease;
+  }
+  #play:hover { transform: translateY(-2px); }
+  #play:active { transform: translateY(0); }
+
+  /* ---------- grid interativo ---------- */
   #stage {
     position: relative;
     touch-action: none;
     cursor: crosshair;
+    opacity: 0;
+    transform: scale(0.9);
+    transition: opacity 0.9s ease 0.15s,
+                transform 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.15s;
+  }
+  body.playing #stage {
+    opacity: 1;
+    transform: none;
   }
   canvas { display: block; }
+
   #loading {
     position: fixed;
     inset: 0;
+    z-index: 9;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -37,21 +98,33 @@
     font-size: 14px;
     letter-spacing: 0.2em;
     text-transform: uppercase;
-    transition: opacity 0.6s ease;
+    transition: opacity 0.6s ease, visibility 0.6s;
     pointer-events: none;
   }
-  #loading.done { opacity: 0; }
+  #loading.done { opacity: 0; visibility: hidden; }
 </style>
 </head>
 <body>
+
+<div id="intro">
+  <svg id="logo" xmlns="http://www.w3.org/2000/svg"></svg>
+  <button id="play">ouça agora</button>
+</div>
+
 <div id="stage"><canvas id="canvas"></canvas></div>
 <div id="loading">carregando…</div>
 
 <script>
 (() => {
+  // ---------- configuração ----------
+  const IMG_URL = 'WhatsApp%20Image%202026-07-23%20at%2013.05.01.jpeg';
+  const AUDIO_URL = 'WhatsApp%20Audio%202026-07-23%20at%2013.26.35.mp4';
+  const PHRASES = ['GANWALK', 'DEZERT HORSE', 'MALICIA'];
+  const LOGO_FONT = '"Archivo Black", "Arial Black", sans-serif';
+
   const COLS = 6;
   const ROWS = 8;
-  const GAP = 3;           // respiro entre os quadrinhos (px CSS)
+  const GAP = 1;           // linhas bem estreitas entre os quadrinhos (px CSS)
   const BOOST = 2.6;       // quanto uma faixa cresce sob o ponteiro
   const SIGMA = 0.16;      // alcance da influência do ponteiro (fração do lado)
   const EASE = 0.10;       // suavização (0..1) por frame
@@ -59,11 +132,13 @@
   const canvas = document.getElementById('canvas');
   const ctx = canvas.getContext('2d');
   const loading = document.getElementById('loading');
+  const playBtn = document.getElementById('play');
 
   const img = new Image();
-  img.src = 'WhatsApp%20Image%202026-07-23%20at%2013.05.01.jpeg';
+  img.src = IMG_URL;
 
   let W = 0, H = 0, dpr = 1;
+  let started = false;
 
   // pesos das colunas e linhas (atuais e alvo)
   const colW = new Array(COLS).fill(1);
@@ -73,6 +148,124 @@
 
   let pointer = { x: 0, y: 0, active: false };
 
+  // ---------- logo: frases empilhadas, mesma largura, imagem na contraforma ----------
+  function buildLogo() {
+    const SVGNS = 'http://www.w3.org/2000/svg';
+    const svg = document.getElementById('logo');
+    svg.innerHTML = '';
+
+    const measure = document.createElement('canvas').getContext('2d');
+    const REF = 100;        // tamanho de referência para medir
+    const TW = 1000;        // largura alvo comum (unidades do viewBox)
+    const CAP = 0.80;       // altura aproximada das capitais (fração do font-size)
+    const GAPF = 0.10;      // respiro vertical entre as linhas
+
+    const lines = PHRASES.map(p => {
+      measure.font = `${REF}px ${LOGO_FONT}`;
+      const w = measure.measureText(p).width || 1;
+      return { p, fs: REF * TW / w };
+    });
+
+    const defs = document.createElementNS(SVGNS, 'defs');
+    const clip = document.createElementNS(SVGNS, 'clipPath');
+    clip.setAttribute('id', 'textclip');
+    clip.setAttribute('clipPathUnits', 'userSpaceOnUse');
+
+    let top = 0;
+    for (const l of lines) {
+      const baseline = top + l.fs * CAP;
+      const t = document.createElementNS(SVGNS, 'text');
+      t.setAttribute('x', '0');
+      t.setAttribute('y', baseline.toFixed(2));
+      t.setAttribute('textLength', TW);
+      t.setAttribute('lengthAdjust', 'spacingAndGlyphs');
+      t.setAttribute('font-size', l.fs.toFixed(2));
+      t.setAttribute('font-family', LOGO_FONT.replace(/"/g, "'"));
+      t.textContent = l.p;
+      clip.appendChild(t);
+      top = baseline + l.fs * GAPF;
+    }
+    const totalH = top - lines[lines.length - 1].fs * GAPF;
+
+    defs.appendChild(clip);
+    svg.appendChild(defs);
+
+    const image = document.createElementNS(SVGNS, 'image');
+    image.setAttribute('href', IMG_URL);
+    image.setAttribute('x', '0');
+    image.setAttribute('y', '0');
+    image.setAttribute('width', TW);
+    image.setAttribute('height', totalH.toFixed(2));
+    image.setAttribute('preserveAspectRatio', 'xMidYMid slice');
+    image.setAttribute('clip-path', 'url(#textclip)');
+    svg.appendChild(image);
+
+    svg.setAttribute('viewBox', `0 0 ${TW} ${totalH.toFixed(2)}`);
+  }
+
+  // ---------- áudio: filtro controlado pela interação ----------
+  let actx = null, filter = null, audioReady = false;
+
+  async function initAudio() {
+    try {
+      actx = new (window.AudioContext || window.webkitAudioContext)();
+
+      filter = actx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = 20000;   // aberto = música normal
+      filter.Q.value = 0.0001;
+
+      const gain = actx.createGain();
+      gain.gain.value = 0.9;
+      filter.connect(gain);
+      gain.connect(actx.destination);
+
+      try {
+        // caminho principal: decodifica o arquivo e toca em loop
+        const res = await fetch(AUDIO_URL);
+        if (!res.ok) throw new Error('arquivo de áudio não encontrado');
+        const buf = await actx.decodeAudioData(await res.arrayBuffer());
+        const src = actx.createBufferSource();
+        src.buffer = buf;
+        src.loop = true;
+        src.connect(filter);
+        src.start();
+      } catch (e) {
+        // fallback: elemento <audio> ligado ao mesmo filtro
+        const el = new Audio(AUDIO_URL);
+        el.loop = true;
+        el.crossOrigin = 'anonymous';
+        const src = actx.createMediaElementSource(el);
+        src.connect(filter);
+        await el.play();
+      }
+      audioReady = true;
+    } catch (e) {
+      audioReady = false;   // sem áudio: os visuais seguem funcionando
+      console.warn('áudio indisponível:', e);
+    }
+  }
+
+  function updateFilter() {
+    if (!audioReady) return;
+    const t = actx.currentTime;
+    if (pointer.active) {
+      const fx = Math.min(Math.max(pointer.x / W, 0), 1);
+      const fy = Math.min(Math.max(pointer.y / H, 0), 1);
+      // x → brilho (frequência de corte, escala exponencial)
+      const freq = 140 * Math.pow(18000 / 140, fx);
+      // y → ressonância (mais em cima = mais ressonante)
+      const q = 0.7 + (1 - fy) * 11;
+      filter.frequency.setTargetAtTime(freq, t, 0.06);
+      filter.Q.setTargetAtTime(q, t, 0.08);
+    } else {
+      // sem interação: volta suavemente para a música normal
+      filter.frequency.setTargetAtTime(20000, t, 0.25);
+      filter.Q.setTargetAtTime(0.0001, t, 0.25);
+    }
+  }
+
+  // ---------- grid ----------
   function resize() {
     const aspect = img.naturalWidth / img.naturalHeight;
     const pad = 24;
@@ -182,6 +375,7 @@
     updateTargets();
     ease();
     draw();
+    updateFilter();
     requestAnimationFrame(frame);
   }
 
@@ -199,10 +393,22 @@
   canvas.addEventListener('pointercancel', () => { pointer.active = false; });
   window.addEventListener('resize', () => { if (img.complete) resize(); });
 
-  img.onload = () => {
+  playBtn.addEventListener('click', () => {
+    if (started) return;
+    started = true;
+    initAudio();                       // precisa do gesto do usuário (autoplay)
+    document.body.classList.add('playing');
     resize();
-    loading.classList.add('done');
     requestAnimationFrame(frame);
+  });
+
+  img.onload = () => {
+    buildLogo();
+    loading.classList.add('done');
+    // refina as larguras quando a fonte bold terminar de carregar
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(buildLogo);
+    }
   };
 })();
 </script>
